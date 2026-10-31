@@ -28,7 +28,8 @@ wazuh-soc-detection-lab/
 │   ├── 01_Wazuh_SIEM_Setup_and_Configuration.pdf
 │   ├── 02_Attack_Simulation_FTP_Brute_Force.pdf
 │   ├── 03_Attack_Simulation_SQL_Injection_DVWA.pdf
-│   └── 04_Attack_Simulation_URL_Fuzzing_Gobuster.pdf
+│   ├── 04_Attack_Simulation_URL_Fuzzing_Gobuster.pdf
+│   └── 05_Attack_Simulation_Password_Spraying.pdf
 └── rules/
     └── local_rules.xml
 ```
@@ -123,6 +124,36 @@ Each simulation follows the same structure: pre-attack baseline → attack execu
 
 ---
 
+### 2.4 Password Spraying — Hydra vs Metasploitable2 FTP
+
+**Report:** `reports/05_Attack_Simulation_Password_Spraying.pdf`
+
+| Field | Detail |
+|---|---|
+| Tool | Hydra v9.7 (list-mode: `-L` userlist, single fixed `-p` password) |
+| Target | Metasploitable2 vsftpd (port 21) |
+| Username list | 7 plausible accounts (msfadmin, admin, root, user, service, postgres, ftp) |
+| MITRE ATT&CK | T1110.003 — Password Spraying |
+| Detection rule added | 100020 (documented limitation — did not fire) |
+
+**Key finding:** The mirror image of the FTP brute-force simulation (one password against many usernames instead of many passwords against one). Existing rule 100017 fired at level 10 on the spray traffic, but its description ("FTP brute force") mislabels the activity — it only counts five PAM failures from one source and never checks whether they targeted one account or several, which could mislead an analyst about the scope of the incident. Custom rule 100020 was written using Wazuh's `<different_user />` option and tagged T1110.003. The rule was confirmed saved, loaded cleanly, and tested against a verified clean sequence of six distinct usernames (ruling out Hydra retry behavior), yet it did not fire. This is documented as an open limitation rather than silently dropped; a suspected cause is how the correlation engine handles two frequency rules sharing an identical `if_matched_sid` + `same_source_ip` + frequency/timeframe signature, with follow-up ideas including pairing with `<same_user />` or deconflicting via rule ordering / `<if_group>`.
+
+```xml
+<rule id="100020" level="10" frequency="5" timeframe="120">
+  <if_matched_sid>5503</if_matched_sid>
+  <program_name>vsftpd</program_name>
+  <same_source_ip />
+  <different_user />
+  <description>FTP password spraying: multiple distinct accounts targeted from same source</description>
+  <group>authentication_failures,recon,</group>
+  <mitre>
+    <id>T1110.003</id>
+  </mitre>
+</rule>
+```
+
+---
+
 ## Custom Detection Rules Summary
 
 All rules live in `/var/ossec/etc/rules/local_rules.xml` on the Wazuh manager.
@@ -134,6 +165,7 @@ All rules live in `/var/ossec/etc/rules/local_rules.xml` on the Wazuh manager.
 | 100017 | FTP brute force — vsftpd (5 failures in 120s) | T1110.001 | 10 | 5503 |
 | 100018 | SQL injection pattern in Apache access log | T1190 | 10 | 31108 |
 | 100019 | URL fuzzing — high-volume 404s from single IP (20 in 60s) | T1595 | 10 | 31101 |
+| 100020 | FTP password spraying — distinct accounts from single IP (5 in 120s, `<different_user />`) — did not fire; documented limitation | T1110.003 | 10 | 5503 |
 
 ---
 
